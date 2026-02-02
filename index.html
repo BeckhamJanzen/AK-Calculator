@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sweeps Calculator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f4f9;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 450px;
+        }
+        h2 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+        }
+        input[type="number"], select {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .radio-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 5px;
+        }
+        .radio-group label {
+            font-weight: normal;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .checkbox-group {
+            margin-top: 15px;
+        }
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: normal;
+            cursor: pointer;
+            margin-bottom: 5px;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #result-area {
+            margin-top: 20px;
+            background-color: #eee;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: "Courier New", Courier, monospace;
+            white-space: pre-wrap; /* Keeps line breaks */
+            border: 1px solid #ddd;
+            min-height: 100px;
+        }
+        .error {
+            color: #d9534f;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Sweeps Calculator</h2>
+
+    <div class="form-group">
+        <label for="players">Number of Players:</label>
+        <input type="number" id="players" placeholder="e.g. 50">
+    </div>
+
+    <div class="form-group">
+        <label for="cost">Entry Fee (Gold):</label>
+        <input type="number" id="cost" placeholder="e.g. 1000">
+    </div>
+
+    <div class="form-group">
+        <label for="house">House Taken (%):</label>
+        <input type="number" id="house" value="10">
+    </div>
+
+    <div class="form-group">
+        <label>Define Winners by:</label>
+        <div class="radio-group">
+            <label><input type="radio" name="winnerMode" value="1" checked> Fixed Number</label>
+            <label><input type="radio" name="winnerMode" value="2"> Percentage (%)</label>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label for="winnersVal">Winners (Count or %):</label>
+        <input type="number" id="winnersVal" placeholder="e.g. 5">
+    </div>
+
+    <div class="form-group">
+        <label for="tiers">Number of Tiers (Optional):</label>
+        <input type="number" id="tiers" placeholder="Default: 1">
+    </div>
+
+    <div class="checkbox-group">
+        <label>
+            <input type="checkbox" id="halving"> Enable Halving Mode
+        </label>
+        <label>
+            <input type="checkbox" id="round10"> Round to Nearest 10
+        </label>
+    </div>
+
+    <button onclick="calculatePayout()">Calculate Payout</button>
+
+    <div id="result-area">Enter values and click Calculate...</div>
+</div>
+
+<script>
+    function calculatePayout() {
+        // --- 1. Get Inputs ---
+        const players = parseInt(document.getElementById('players').value);
+        const cost = parseInt(document.getElementById('cost').value);
+        const housePercent = parseFloat(document.getElementById('house').value);
+        
+        // Get Radio Value
+        const modes = document.getElementsByName('winnerMode');
+        let winnerMode = 1; 
+        for(let mode of modes){
+            if(mode.checked) winnerMode = parseInt(mode.value);
+        }
+
+        const rawWinnerVal = parseFloat(document.getElementById('winnersVal').value);
+        
+        let tiers = parseInt(document.getElementById('tiers').value);
+        if (isNaN(tiers)) tiers = 1; // Default if empty
+
+        const useHalving = document.getElementById('halving').checked;
+        const roundDown10 = document.getElementById('round10').checked;
+
+        // --- 2. Validation ---
+        const resultLabel = document.getElementById('result-area');
+        if (isNaN(players) || isNaN(cost) || isNaN(housePercent) || isNaN(rawWinnerVal)) {
+            resultLabel.innerHTML = '<span class="error">Error: Please check your inputs. Ensure all fields have numbers.</span>';
+            return;
+        }
+
+        // --- 3. Logic Ported from Python ---
+        
+        // Calculate Winner Count
+        let totalWinners = 0;
+        if (winnerMode === 2) { // Percentage
+            const calcCount = players * (rawWinnerVal / 100);
+            totalWinners = Math.max(1, Math.round(calcCount));
+        } else { // Fixed
+            totalWinners = Math.floor(rawWinnerVal);
+        }
+
+        if (totalWinners > players) {
+            totalWinners = players;
+        }
+
+        // Validate Tiers
+        if (tiers < 1) tiers = 1;
+        if (tiers > totalWinners) {
+            resultLabel.innerHTML = '<span class="error">Error: Cannot have more Tiers than Winners</span>';
+            return;
+        }
+
+        // Pot Calculations
+        const grossPot = players * cost;
+        // In Python: int(gross_pot * (house_percent / 100)) -> Math.floor in JS
+        const houseInitialFee = Math.floor(grossPot * (housePercent / 100));
+        const netPrizePool = grossPot - houseInitialFee;
+
+        // Tier Distribution (Splitting people into tiers)
+        // Python: // is integer division. JS: Math.floor(a/b)
+        const baseCount = Math.floor(totalWinners / tiers);
+        const remainder = totalWinners % tiers;
+        
+        let tierCounts = new Array(tiers).fill(baseCount);
+        // Distribute remainder to bottom tiers first (matching Python logic)
+        for (let i = 0; i < remainder; i++) {
+            // Python: tier_counts[-(i+1)] += 1
+            // JS: Access from end using length
+            tierCounts[tiers - 1 - i] += 1;
+        }
+
+        let tierPayouts = new Array(tiers).fill(0);
+
+        // Raw Payout Calculation
+        if (!useHalving) {
+            if (totalWinners > 0) {
+                const basePrize = Math.floor(netPrizePool / totalWinners);
+                tierPayouts.fill(basePrize);
+            }
+        } else {
+            let totalShares = 0;
+            for (let i = 0; i < tiers; i++) {
+                const power = tiers - 1 - i;
+                const multiplier = Math.pow(2, power);
+                totalShares += tierCounts[i] * multiplier;
+            }
+
+            if (totalShares > 0) {
+                const baseUnit = Math.floor(netPrizePool / totalShares);
+                for (let i = 0; i < tiers; i++) {
+                    const power = tiers - 1 - i;
+                    tierPayouts[i] = baseUnit * Math.pow(2, power);
+                }
+            }
+        }
+
+        // Optimization (Distribute remaining single gold units)
+        let usedGold = 0;
+        for (let i = 0; i < tiers; i++) {
+            usedGold += tierPayouts[i] * tierCounts[i];
+        }
+
+        let leftoverGold = netPrizePool - usedGold;
+        let changeMade = true;
+
+        while (changeMade && leftoverGold > 0) {
+            changeMade = false;
+            for (let i = 0; i < tiers; i++) {
+                const costToBump = tierCounts[i];
+                if (leftoverGold >= costToBump) {
+                    tierPayouts[i] += 1;
+                    leftoverGold -= costToBump;
+                    changeMade = true;
+                }
+            }
+        }
+
+        // Rounding Logic (Round to 10)
+        if (roundDown10) {
+            let roundingPot = leftoverGold;
+            
+            for (let i = 0; i < tiers; i++) {
+                const originalVal = tierPayouts[i];
+                const roundedVal = Math.floor(originalVal / 10) * 10;
+                tierPayouts[i] = roundedVal;
+                
+                const diff = originalVal - roundedVal;
+                roundingPot += (diff * tierCounts[i]);
+            }
+
+            changeMade = true;
+            while (changeMade && roundingPot > 0) {
+                changeMade = false;
+                for (let i = 0; i < tiers; i++) {
+                    const costToBump10 = tierCounts[i] * 10;
+                    if (roundingPot >= costToBump10) {
+                        tierPayouts[i] += 10;
+                        roundingPot -= costToBump10;
+                        changeMade = true;
+                    }
+                }
+            }
+            leftoverGold = roundingPot;
+        }
+
+        // --- 4. Construct Output Text ---
+        let resultDetails = [];
+        let totalPayoutCalculated = 0;
+
+        for (let i = 0; i < tiers; i++) {
+            const amount = tierPayouts[i];
+            const count = tierCounts[i];
+            totalPayoutCalculated += amount * count;
+            resultDetails.push(`Tier ${i+1} (${count} people): ${amount} Gold each`);
+        }
+
+        const finalLeftover = netPrizePool - totalPayoutCalculated;
+        const finalHouseTake = houseInitialFee + finalLeftover;
+
+        let resultString = resultDetails.join('\n');
+        if (finalLeftover > 0) {
+            resultString += `\n\n(Leftover ${finalLeftover} Gold added to House)`;
+        }
+
+        const finalText = 
+`--- RESULTS ---
+Gross Pot: ${grossPot} Gold
+Net Prize Pool: ${netPrizePool} Gold
+Total House Take: ${finalHouseTake} Gold
+-----------------
+${resultString}`;
+
+        // Display
+        resultLabel.innerText = finalText;
+        resultLabel.style.color = "black";
+    }
+</script>
+
+</body>
+</html>
