@@ -47,6 +47,7 @@
             border: 1px solid #ccc;
             border-radius: 6px;
             font-size: 1rem;
+            background-color: #fff;
         }
 
         .radio-group {
@@ -63,11 +64,18 @@
             cursor: pointer;
         }
 
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
         .checkbox-group {
             margin-top: 20px;
             background: #f9f9f9;
             padding: 10px;
             border-radius: 6px;
+            border: 1px solid #eee;
         }
 
         .checkbox-group label {
@@ -76,11 +84,6 @@
             gap: 10px;
             font-weight: normal;
             cursor: pointer;
-            margin-bottom: 8px;
-        }
-        
-        .checkbox-group label:last-child {
-            margin-bottom: 0;
         }
 
         button {
@@ -108,7 +111,7 @@
             border: 1px solid #e1e1e1;
             border-radius: 8px;
             overflow: hidden;
-            display: none; /* Hidden by default */
+            display: none;
         }
         
         #result-area.active {
@@ -134,10 +137,6 @@
             color: #333;
             font-size: 1rem;
             margin-top: 5px;
-        }
-
-        .result-row.highlight {
-            color: #007bff;
         }
 
         .result-body {
@@ -222,16 +221,31 @@
     </div>
 
     <div class="form-group">
-        <label for="tiers">Number of Tiers (Optional):</label>
+        <label for="tiers">Number of Tiers:</label>
         <input id="tiers" placeholder="Default: 1" type="number">
+    </div>
+
+    <div class="settings-grid">
+        <div class="form-group">
+            <label for="peopleMode">People Structure:</label>
+            <select id="peopleMode">
+                <option value="equal">Equal</option>
+                <option value="linear" selected>Pyramid (Staggered)</option>
+                <option value="exp">Halving (Exponential)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="prizeMode">Prize Structure:</label>
+            <select id="prizeMode">
+                <option value="linear" selected>Linear (Staggered)</option>
+                <option value="exp">Doubling (Exponential)</option>
+            </select>
+        </div>
     </div>
 
     <div class="checkbox-group">
         <label>
-            <input id="halving" type="checkbox"> Enable Halving Mode
-        </label>
-        <label>
-            <input id="round10" type="checkbox"> Round to Nearest 10
+            <input id="round10" type="checkbox" checked> Round Payouts to Nearest 10
         </label>
     </div>
 
@@ -252,19 +266,19 @@
         const errorArea = document.getElementById('error-area');
         const resultArea = document.getElementById('result-area');
         
-        // Reset displays
         errorArea.innerHTML = '';
         resultArea.innerHTML = '';
         resultArea.classList.remove('active');
 
-        // Inputs
+        // --- 1. Get Inputs ---
         const players = parseInt(document.getElementById('players').value);
         const cost = parseInt(document.getElementById('cost').value);
         const housePercent = parseFloat(document.getElementById('house').value);
         const rawWinnerVal = parseFloat(document.getElementById('winnersVal').value);
         let tiers = parseInt(document.getElementById('tiers').value);
         
-        const useHalving = document.getElementById('halving').checked;
+        const peopleMode = document.getElementById('peopleMode').value;
+        const prizeMode = document.getElementById('prizeMode').value;
         const roundDown10 = document.getElementById('round10').checked;
 
         // Validation
@@ -273,12 +287,10 @@
             return;
         }
 
-        // Determine number of winners
+        // --- 2. Calculate Winners ---
         const modes = document.getElementsByName('winnerMode');
         let winnerMode = 1;
-        for (let mode of modes) {
-            if (mode.checked) winnerMode = parseInt(mode.value);
-        }
+        for (let mode of modes) { if (mode.checked) winnerMode = parseInt(mode.value); }
 
         let totalWinners;
         if (winnerMode === 2) {
@@ -288,63 +300,86 @@
             totalWinners = Math.floor(rawWinnerVal);
         }
 
-        // Logical cap on winners
-        if (totalWinners > players) {
-            totalWinners = players;
-        }
-
+        if (totalWinners > players) totalWinners = players;
         if (isNaN(tiers) || tiers < 1) tiers = 1;
-        if (tiers > totalWinners) {
-            tiers = totalWinners; // Silently fix tier cap
+        if (tiers > totalWinners) tiers = totalWinners;
+
+        // --- 3. Distribute PEOPLE into Tiers ---
+        // Array index 0 = Top Tier. Index T-1 = Bottom Tier.
+        
+        let peopleWeights = [];
+        if (peopleMode === 'equal') {
+            peopleWeights = new Array(tiers).fill(1);
+        } else if (peopleMode === 'linear') {
+            // Weights: 1, 2, 3... (Top gets 1, Bottom gets max)
+            for (let i = 1; i <= tiers; i++) peopleWeights.push(i);
+        } else if (peopleMode === 'exp') {
+            // Weights: 1, 2, 4...
+            for (let i = 0; i < tiers; i++) peopleWeights.push(Math.pow(2, i));
         }
 
-        // Financials
+        // Use Largest Remainder Method for People integers
+        let totalWeightP = peopleWeights.reduce((a, b) => a + b, 0);
+        let tierCounts = peopleWeights.map(w => Math.floor(totalWinners * (w / totalWeightP)));
+        let currentCount = tierCounts.reduce((a, b) => a + b, 0);
+        let remainderP = totalWinners - currentCount;
+        let decimals = peopleWeights.map(w => (totalWinners * (w / totalWeightP)) % 1);
+        
+        while (remainderP > 0) {
+            let maxIndex = decimals.indexOf(Math.max(...decimals));
+            tierCounts[maxIndex]++;
+            decimals[maxIndex] = -1; 
+            remainderP--;
+        }
+
+        // --- 4. Distribute PRIZE MONEY ---
+        
         const grossPot = players * cost;
         const houseInitialFee = Math.floor(grossPot * (housePercent / 100));
-        const netPrizePool = grossPot - houseInitialFee;
+        let netPrizePool = grossPot - houseInitialFee;
 
-        // Tier Distribution Logic
-        const baseCount = Math.floor(totalWinners / tiers);
-        const remainder = totalWinners % tiers;
-
-        let tierCounts = new Array(tiers).fill(baseCount);
-        // Distribute remainder people to top tiers
-        for (let i = 0; i < remainder; i++) {
-            tierCounts[tiers - 1 - i] += 1;
+        // SMART ROUNDING PREP: 
+        // If rounding to 10, try to reserve 10 gold for everyone first so Bottom tier isn't 0.
+        let basePayouts = new Array(tiers).fill(0);
+        
+        if (roundDown10) {
+            const minRequired = totalWinners * 10;
+            if (netPrizePool >= minRequired) {
+                basePayouts.fill(10);
+                netPrizePool -= minRequired; // We distribute the rest as bonus
+            }
         }
 
-        let tierPayouts = new Array(tiers).fill(0);
-
-        // 1. Calculate Base Payouts
-        if (!useHalving) {
-            if (totalWinners > 0) {
-                const basePrize = Math.floor(netPrizePool / totalWinners);
-                tierPayouts.fill(basePrize);
-            }
+        // Calculate Weights for the remaining NetPot
+        let prizeWeights = [];
+        if (prizeMode === 'linear') {
+            // Weights: T, T-1, ..., 1. (Top tier gets max weight)
+            for (let i = 0; i < tiers; i++) prizeWeights.push(tiers - i);
+        } else if (prizeMode === 'exp') {
+            // Weights: 2^(T-1) down to 1
+            for (let i = 0; i < tiers; i++) prizeWeights.push(Math.pow(2, tiers - 1 - i));
         } else {
-            // Halving Logic
-            let totalShares = 0;
-            for (let i = 0; i < tiers; i++) {
-                const power = tiers - 1 - i;
-                const multiplier = Math.pow(2, power);
-                totalShares += tierCounts[i] * multiplier;
-            }
-
-            if (totalShares > 0) {
-                const baseUnit = Math.floor(netPrizePool / totalShares);
-                for (let i = 0; i < tiers; i++) {
-                    const power = tiers - 1 - i;
-                    tierPayouts[i] = baseUnit * Math.pow(2, power);
-                }
-            }
+             // Fallback if 'equal' somehow selected, though hidden
+             prizeWeights = new Array(tiers).fill(1);
         }
 
-        // 2. Optimization Loop (Spend loose change)
-        // If not rounding to 10 yet, just try to spend every single gold piece
+        let totalFactor = 0;
+        for(let i=0; i<tiers; i++) {
+            totalFactor += tierCounts[i] * prizeWeights[i];
+        }
+        if (totalFactor === 0) totalFactor = 1;
+
+        const unitValue = Math.floor(netPrizePool / totalFactor);
+        
+        // These are the "Bonus" payouts
+        let tierPayouts = prizeWeights.map(w => w * unitValue);
+
+        // --- 5. Optimization Loop (Spend Loose Change) ---
         let usedGold = 0;
         for (let i = 0; i < tiers; i++) usedGold += tierPayouts[i] * tierCounts[i];
         let leftoverGold = netPrizePool - usedGold;
-        
+
+        // Fill loose change into top tiers
         let changeMade = true;
         while (changeMade && leftoverGold > 0) {
             changeMade = false;
@@ -358,21 +393,18 @@
             }
         }
 
-        // 3. Rounding to 10 Logic (This creates the "Rounding Leftover")
+        // --- 6. Apply Rounding to the "Bonus" ---
         if (roundDown10) {
-            // First, floor everyone to 10
-            let roundingPot = leftoverGold; // Carry over any previous dust
+            let roundingPot = leftoverGold;
             
             for (let i = 0; i < tiers; i++) {
                 const originalVal = tierPayouts[i];
                 const roundedVal = Math.floor(originalVal / 10) * 10;
                 tierPayouts[i] = roundedVal;
-                
-                // Add the chopped off amount back to pot
                 roundingPot += ((originalVal - roundedVal) * tierCounts[i]);
             }
 
-            // Now try to redistribute that pot in chunks of 10
+            // Distribute rounding pot in chunks of 10
             changeMade = true;
             while (changeMade && roundingPot > 0) {
                 changeMade = false;
@@ -385,39 +417,42 @@
                     }
                 }
             }
-            leftoverGold = roundingPot; // This is the final rounding leftover
+            leftoverGold = roundingPot;
         }
 
-        // Generate HTML Output
+        // --- 7. Combine Base (10) + Bonus ---
+        for(let i=0; i<tiers; i++) {
+            tierPayouts[i] += basePayouts[i];
+        }
+
+        // --- 8. HTML Output ---
         let tiersHtml = '';
         let totalPaidOut = 0;
 
-        // Since the array logic puts lowest payout at index 0 or index last depending on halving, 
-        // usually we want Tier 1 to be the highest paid.
-        // Let's sort simply by payout amount descending for display.
-        // We create objects to sort them
-        let displayTiers = [];
-        for(let i=0; i<tiers; i++) {
-            displayTiers.push({ payout: tierPayouts[i], count: tierCounts[i] });
-        }
-        displayTiers.sort((a, b) => b.payout - a.payout);
+        for(let i = 0; i < tiers; i++) {
+            if (tierCounts[i] === 0) continue;
 
-        displayTiers.forEach((t, index) => {
-            const subTotal = t.payout * t.count;
+            const payout = tierPayouts[i];
+            const count = tierCounts[i];
+            const subTotal = payout * count;
             totalPaidOut += subTotal;
+
             tiersHtml += `
             <div class="tier-row">
                 <div>
-                    <div class="tier-label">Tier ${index + 1}</div>
-                    <div class="tier-detail">${t.count} people</div>
+                    <div class="tier-label">Tier ${i + 1}</div>
+                    <div class="tier-detail">${count} people</div>
                 </div>
                 <div style="text-align:right">
-                    <div class="tier-label" style="color:#007bff">${fmt(t.payout)} G</div>
+                    <div class="tier-label" style="color:#007bff">${fmt(payout)} G</div>
                     <div class="tier-detail">Total: ${fmt(subTotal)} G</div>
                 </div>
             </div>`;
-        });
+        }
 
+        // Net Pool Calculation for display needs to account for the logic split
+        // Real Net Pool = Gross - Initial Fee.
+        const displayNetPool = grossPot - houseInitialFee;
         const totalHouseTake = houseInitialFee + leftoverGold;
         
         const html = `
@@ -432,7 +467,7 @@
                 </div>
                 <div class="result-row main">
                     <span>Net Prize Pool:</span>
-                    <span>${fmt(netPrizePool)}</span>
+                    <span>${fmt(displayNetPool)}</span>
                 </div>
             </div>
 
